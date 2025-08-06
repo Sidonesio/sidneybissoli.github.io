@@ -1,0 +1,27 @@
+---
+title: "Projects"
+subtitle: "R Analysis in Psychology, Public Health, and Financial Markets"
+page-layout: full
+---
+
+Welcome to my projects showcase! Here you'll find my data analysis work using R, organized into three main areas:
+
+## 🧠 Psychology
+
+Research and analysis in psychological sciences.
+
+## 🏥 Public Health Studies
+
+Analyzing health data to understand patterns, trends, and public health implications.
+
+## 📈 Financial Markets Research
+
+Exploring financial data, market analysis, and investment strategies using R.
+
+### Featured Analysis:
+
+-   [**Liquidity Ratios Analysis**](financial-markets/liquidity-analysis/) - Balance sheet analysis of Brazilian companies (B3) with interactive visualizations comparing company performance against sector averages.
+
+------------------------------------------------------------------------
+
+*More projects coming soon as we migrate from [RPubs](https://rpubs.com/Bissoli).*

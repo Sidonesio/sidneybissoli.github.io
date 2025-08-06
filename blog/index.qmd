@@ -1,0 +1,14 @@
+---
+title: "Blog"
+subtitle: "Insights on Psychology, Public Health, and Finance"
+listing:
+  contents: posts
+  sort: "date desc"
+  type: grid
+  categories: true
+  sort-ui: false
+  filter-ui: false
+page-layout: full
+---
+
+Welcome to my blog! Here I share insights, tutorials, and thoughts on psychology, public health, and financial markets.

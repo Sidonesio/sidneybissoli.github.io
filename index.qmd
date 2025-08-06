@@ -1,0 +1,36 @@
+---
+title: "Sidney Bissoli"
+subtitle: "Psychologist | Public Health Researcher | Financial Markets Analyst"
+image: profile.jpg
+about:
+  template: trestles
+  image-width: 15em
+  image-shape: round
+  links:
+    - icon: linkedin
+      text: LinkedIn
+      href: "https://linkedin.com/in/sidneybissoli/"
+    - icon: envelope
+      text: Email
+      href: "mailto:sbissoli76@gmail.com"
+---
+
+## Welcome
+
+I am a psychologist with expertise in **public health research** and **financial markets analysis**. I use R programming to explore complex data and uncover insights that bridge psychology, health policy, and economic behavior.
+
+## Research Interests
+
+-   **Psychology:** Psychoanalysis, behavioral economics, decision-making processes
+-   **Public Health:** Population health patterns, epidemiological analysis, health policy research
+-   **Financial Markets:** Investment analysis, market behavior, economic indicators
+
+## Skills & Tools
+
+-   **Programming:** R (tidyverse, ggplot2, tidymodels)
+-   **Analysis:** Statistical modeling, data visualization, predictive analytics
+-   **Domains:** Psychological research, public health data, financial market analysis
+
+------------------------------------------------------------------------
+
+Explore my [projects](projects/) to see R analysis in psychology, health, and finance, or read my [blog](blog/) for insights on these interconnected fields.

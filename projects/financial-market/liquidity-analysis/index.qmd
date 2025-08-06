@@ -1,0 +1,491 @@
+---
+title: "Liquidity Ratios Analysis - Brazilian Stock Market (B3)"
+subtitle: "Balance Sheet Analysis for Investment Decision Support"
+author: "Sidney Bissoli"
+date: "2025-08-05"
+categories: [Financial Market, B3, Liquidity Analysis, R]
+image: "liquidity_preview.png"
+---
+
+## Overview
+
+This project demonstrates how to extract annual balance sheets from publicly traded companies listed on B3 (Brazilian stock exchange), and to calculate liquidity ratios (current, quick, immediate, and general) from this data, in order to inform investment decisions.
+
+## Methodology
+
+Using R programming and financial data analysis techniques, this study focuses on four key liquidity ratios:
+
+-   **Current Ratio:** Current assets / Current liabilities
+
+-   **Quick Ratio:** (Current assets - Inventory) / Current liabilities
+
+-   **Immediate Ratio:** Cash and equivalents / Current liabilities
+
+-   **General Ratio:** (Current assets + Long-term assets) / (Current + Non-current liabilities)
+
+## Data Extraction and Preparation
+
+```{r}
+#| echo: true 
+#| #| warning: false 
+#| #| message: false
+#| # install pacman if it is not installed
+
+# install pacman if it is not installed
+if (!require("pacman")) install.packages("pacman")
+
+# install packages if they are not installed and load them
+pacman::p_load(
+  tidyverse,
+  GetDFPData2,
+  janitor,
+  here,
+  scales,
+  ggthemes,
+  plotly,
+  DT,
+  crosstalk,
+  htmltools
+  )
+```
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+
+# store company name
+cia_name <- "anima"
+
+# get data
+data_info <- get_info_companies()
+
+# subset companies currently traded on B3
+info_cleaned <- 
+  data_info |>
+  clean_names() |>
+  rename(
+    name_social     = denom_social,
+    name_commercial = denom_comerc,
+    registro        = sit_reg,
+    code_cvm        = cd_cvm,
+    sector          = setor_ativ,
+    tipo            = tp_merc
+    ) |>
+  mutate(across(c(registro, tipo, sector), str_to_lower)) |>
+  filter(registro == "ativo") |>
+  filter(tipo == "bolsa") |>
+  mutate(sector = str_remove_all(sector, ".*- "))
+
+# store company sector
+cia_sector <- 
+  info_cleaned |>
+  filter(str_detect(name_social, str_to_upper(cia_name))) |>
+  pull(sector)
+
+# store company codes from the same economic sector of company chosen
+cvm_codes <- 
+  info_cleaned |>
+  filter(sector == cia_sector) |>
+  pull(code_cvm)
+
+# download balance sheet data
+list_bp  <- 
+  get_dfp_data(
+    companies_cvm_codes = cvm_codes,
+    type_docs           = c("BPA","BPP"),
+    type_format         = "con",
+    clean_data          = TRUE,
+    use_memoise         = FALSE,
+    cache_folder        = "gdfpd2_cache"
+)
+```
+
+## Data Processing and Liquidity Calculations
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+
+# convert list into data set and provide basic manipulations
+data_bp <-
+  list_bp |>
+  bind_rows() |>
+  clean_names() |>
+  rename(
+    cnpj        = cnpj_cia, 
+    date        = dt_refer,
+    name        = denom_cia,
+    escala      = escala_moeda,
+    value       = vl_conta,
+    index       = cd_conta,
+    description = ds_conta
+    ) |>
+  mutate(across(c(escala, description), str_to_lower)) |>
+  mutate(value = case_when(
+    escala == "mil" ~ value * 1000,
+    TRUE            ~ value
+  ))
+
+# store company complete name
+cia_name_complete <- 
+  data_bp |>
+  filter(str_detect(name, str_to_upper(cia_name))) |>
+  distinct(name) |>
+  pull(name)
+
+# store variables of interest
+variables_chosen <- c(
+  "ativo circulante",
+  "passivo circulante",
+  "caixa e equivalentes de caixa",
+  "ativo realizável a longo prazo",
+  "passivo não circulante"
+)
+
+# store index for inventory (estoques)
+index_chosen <- "1.01.04"
+
+# convert data to wide format
+data_wide <-
+  data_bp |>
+  filter(description %in% variables_chosen | index %in% index_chosen) |>
+  select(date, name, description, value) |>
+  mutate(description = case_when(
+    str_detect(description, "caixa")              ~ "caixa",
+    str_detect(description, "realizável")         ~ "at_realizavel",
+    str_detect(description, "não circulante")     ~ "pa_nao_circ",
+    str_detect(description, "ativo circulante")   ~ "at_circ",
+    str_detect(description, "passivo circulante") ~ "pa_circ",
+    TRUE                                          ~ description
+  )) |>
+  pivot_wider(names_from = description, values_from = value) |>
+  group_by(date) |>
+  mutate(n = n()) |>
+  ungroup()
+
+# store abbreviated variables
+variables_abbreviated <- c(
+  "at_circ",
+  "pa_circ",
+  "caixa",
+  "at_realizavel",
+  "pa_nao_circ",
+  "estoques"
+)
+
+# calculate sector totals
+data_total <- 
+  data_wide |>
+  select(-name) |>
+  group_by(date) |>
+  mutate(across(any_of(variables_abbreviated), sum, na.rm = TRUE)) |>
+  ungroup() |>
+  mutate(name = str_to_upper("total"), .after = date) |>
+  distinct()
+
+# combine company data with sector averages
+data_subset <-
+  data_wide |>
+  bind_rows(data_total) |>
+  mutate(name = str_to_lower(name)) |>
+  filter(str_detect(name, cia_name) | name == "total") |>
+  mutate(name = str_to_upper(name))
+
+# calculate liquidity ratios
+data_multiplos <- 
+  data_subset |> 
+  mutate(
+    liq_corrente = at_circ / pa_circ,
+    liq_seca     = (at_circ - coalesce(estoques, 0)) / pa_circ,
+    liq_imediata = caixa / pa_circ,
+    liq_geral    = (at_circ + at_realizavel) / (pa_circ + pa_nao_circ)
+  ) |>
+  select(date, name, starts_with("liq"), n)
+```
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+
+# order levels for classification
+levels <- c(
+  "adequate", 
+  "regular", 
+  "concerning", 
+  "critical"
+  )
+
+# prepare data for visualization with classification
+data_classification <- 
+  data_multiplos |>
+  group_by(date) |>
+  filter(n() == 2) |>
+  ungroup() |>
+  arrange(date) |>
+  pivot_longer(cols = starts_with("liq"), names_to = "variable") |>
+  mutate(classification = case_when(
+    variable == "liq_corrente" & value < 1                   ~ "critical",
+    variable == "liq_corrente" & value >= 1   & value < 1.2  ~ "concerning",
+    variable == "liq_corrente" & value >= 1.2 & value < 1.5  ~ "regular",
+    variable == "liq_corrente" & value >= 1.5                ~ "adequate",
+    variable == "liq_seca"     & value < .8                  ~ "critical",
+    variable == "liq_seca"     & value >= .8  & value <=1    ~ "concerning",
+    variable == "liq_seca"     & value > 1                   ~ "adequate",
+    variable == "liq_imediata" & value < .15                 ~ "critical",
+    variable == "liq_imediata" & value >= .15 & value <=.3   ~ "concerning",
+    variable == "liq_imediata" & value > .3                  ~ "adequate",
+    variable == "liq_geral"    & value < 1                   ~ "critical",
+    variable == "liq_geral"    & value >= 1   & value < 1.2  ~ "concerning",
+    variable == "liq_geral"    & value >= 1.2 & value < 1.5  ~ "regular",
+    variable == "liq_geral"    & value >= 1.5                ~ "adequate",
+  )) |>
+  mutate(classification = str_to_title(classification)) |>
+  mutate(classification = factor(classification, levels = str_to_title(levels))) |>
+  mutate(year = year(date), .after = date)
+
+# nest data by liquidity type
+data_nested <- 
+  data_classification |>
+  nest(data = -variable)
+```
+
+## Interactive Liquidity Analysis Dashboard
+
+::: panel-tabset
+### Current Ratio
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Create Current Ratio plot
+current_data <- 
+  data_nested |> 
+  filter(variable == "liq_corrente") |> 
+  pull(data) |> 
+  pluck(1)
+
+# funtion to build  plots
+create_liquidity_plot <- function(data, type_name, full_name) {
+  
+  # get last year company count
+  n_last <- 
+    data |> 
+    slice_max(date) |> 
+    distinct(n) |> 
+    pull()
+  
+  # create plot
+  p <- 
+    data |> 
+    ggplot(aes(x = factor(year), y = value)) +
+    theme_classic() +
+    geom_col(
+      data    = data |> filter(str_detect(name, str_to_upper(cia_name))),
+      width   = .7,
+      mapping = aes(
+        fill = classification, 
+        text = str_c(
+          "Year: ", year, "<br>",
+          "Value: ", round(value, 2), "<br>",
+          "Classification: ", classification
+          )
+        ),
+      ) +
+    geom_point(
+      data    = data |> filter(str_detect(name, str_to_upper("total"))),
+      color   = "grey30",
+      mapping = aes(text = str_c(
+        "Sector Average<br>",
+        "Year: ", year, "<br>",
+        "Value: ", round(value, 2)
+        ))
+      ) +
+    geom_line(
+      data  = data |> filter(str_detect(name, str_to_upper("total"))),
+      color = "grey30",
+      group = 1
+    ) +
+    geom_text(
+      data    = data |> filter(str_detect(name, str_to_upper(cia_name))),
+    mapping = aes(label = round(value, 1), y = value * 0.8),
+      vjust   = 0.5,
+      color   = "white",
+      fontface = "bold"
+    ) +
+    scale_fill_manual(values = c(
+      "Adequate"   = "green4", 
+      "Regular"    = "royalblue3", 
+      "Concerning" = "orange2", 
+      "Critical"   = "red1"
+      )) +
+    theme(
+      axis.text.x     = element_text(angle = 90, vjust = .5),
+      axis.text.y     = element_text(),
+      legend.position = "bottom",
+      plot.title      = element_text(size = 14, face = "bold"),
+      plot.subtitle   = element_text(size = 12)
+    ) +
+    labs(
+      x        = "Year",
+      y        = "Ratio Value",
+      title    = str_c(cia_name_complete, ": ", full_name),
+      fill     = "Classification",
+      subtitle = str_c("Compared to sector average (", n_last, " companies in latest year)"),
+    ) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0.02, 0.05)),
+      labels = number_format(accuracy = 0.1)  
+      )
+  
+  # convert to plotly
+  ggplotly(p, tooltip = "text") |>
+    layout(
+      title = list(
+        font = list(size = 14),
+        text = str_c(
+          cia_name_complete, 
+          ": ", 
+          full_name, 
+          "<br>",
+          "<sub>Compared to sector average (", n_last, " companies in latest year)</sub>")
+        )
+      )
+}
+
+# Create and display Current Ratio plot
+create_liquidity_plot(current_data, "corrente", "Current Liquidity Ratio")
+```
+
+### Quick Ratio
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Create Quick Ratio plot
+quick_data <- data_nested |> filter(variable == "liq_seca") |> pull(data) |> pluck(1)
+
+create_liquidity_plot(quick_data, "seca", "Quick Liquidity Ratio")
+
+```
+
+### Immediate Ratio
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Create Immediate Ratio plot
+immediate_data <- data_nested |> filter(variable == "liq_imediata") |> pull(data) |> pluck(1)
+
+create_liquidity_plot(immediate_data, "imediata", "Immediate Liquidity Ratio")
+```
+
+### General Ratio
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# Create General Ratio plot
+general_data <- data_nested |> filter(variable == "liq_geral") |> pull(data) |> pluck(1)
+
+create_liquidity_plot(general_data, "geral", "General Liquidity Ratio")
+```
+:::
+
+## Summary Table
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+# create summary table
+summary_table <- 
+ data_multiplos |>
+  filter(str_detect(name, str_to_upper(cia_name))) |>
+  mutate(year = year(date)) |>
+  select(-n) |>
+  pivot_longer(
+    cols      = starts_with("liq"), 
+    names_to  = "ratio", 
+    values_to = "value"
+  ) |>
+  mutate(
+    ratio = case_when(
+      ratio == "liq_corrente" ~ "Current Ratio",
+      ratio == "liq_seca"     ~ "Quick Ratio", 
+      ratio == "liq_imediata" ~ "Immediate Ratio",
+      ratio == "liq_geral"    ~ "General Ratio"
+    ),
+    value = round(value, 2)
+  ) |>
+  select(ratio, year, value) |>
+  pivot_wider(names_from = year, values_from = value) |>
+  rename(Ratio = ratio)
+
+# display interactive table
+datatable(
+  data    = summary_table, 
+  options = list(scrollX = TRUE, pageLength = 4),
+  caption = str_c("Liquidity Ratios for ", cia_name_complete, " by Year")
+  )
+```
+
+## Key Findings
+
+### Company Performance vs. Sector Average
+
+The analysis reveals important insights about **`r cia_name_complete`** liquidity position:
+
+1.  **Current Ratio Trends**: Shows the company's ability to meet short-term obligations
+
+2.  **Quick Ratio Analysis**: Excludes inventory to provide a more conservative liquidity measure
+
+3.  **Immediate Ratio**: Reveals cash position strength for urgent obligations
+
+4.  **General Ratio**: Provides comprehensive liquidity assessment including long-term assets
+
+### Classification System
+
+The visualizations use a color-coded classification system:
+
+-   🟢 **Adequate (green)**: Strong liquidity position
+
+-   🔵 **Regular (blue)**: Acceptable liquidity levels
+
+-   🟠 **Concerning (orange)**: Attention required
+
+-   🔴 **Critical (red)**: Immediate attention needed
+
+## Investment Implications
+
+This liquidity analysis provides valuable insights for:
+
+-   **Portfolio managers** seeking companies with solid financial foundations
+
+-   **Individual investors** evaluating investment safety and company stability
+
+-   **Financial analysts** comparing companies within the same economic sector
+
+-   **Risk managers** assessing short-term financial risk exposure
+
+## Technical Implementation
+
+**Data Sources:** B3 (Brazilian Stock Exchange) official financial reports\
+**Analysis Tools:** R (tidyverse, GetDFPData2, ggplot2, plotly)\
+**Methodology:** Balance sheet analysis with sector benchmarking\
+**Interactivity:** Dynamic plots with hover information and classification tooltips
+
+\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+*This analysis demonstrates the integration of financial data extraction, statistical analysis, and interactive visualization techniques using R programming. The complete methodology can be adapted for analyzing any publicly traded company on B3.*
